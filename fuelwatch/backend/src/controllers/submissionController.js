@@ -36,22 +36,20 @@ function submitPrice(req, res) {
     return res.status(400).json({ error: 'Fuel product not found or inactive.' });
   }
 
-  const submitterId = req.user ? req.user.id : null;
+  const submitterId = req.user.id;
 
-  // Spam prevention applies only to logged-in users
-  if (submitterId) {
-    const recent = db.prepare(`
-      SELECT created_at FROM price_submissions
-      WHERE submitted_by = ? AND station_id = ? AND fuel_product_id = ?
-      ORDER BY created_at DESC
-      LIMIT 1
-    `).get(submitterId, station_id, fuel_product_id);
+  // Spam prevention: same user, same station, same product within interval
+  const recent = db.prepare(`
+    SELECT created_at FROM price_submissions
+    WHERE submitted_by = ? AND station_id = ? AND fuel_product_id = ?
+    ORDER BY created_at DESC
+    LIMIT 1
+  `).get(submitterId, station_id, fuel_product_id);
 
-    if (recent && minutesSince(recent.created_at) < SPAM_INTERVAL_MINUTES) {
-      return res.status(429).json({
-        error: `Please wait ${SPAM_INTERVAL_MINUTES} minutes before submitting again for the same station and fuel product.`,
-      });
-    }
+  if (recent && minutesSince(recent.created_at) < SPAM_INTERVAL_MINUTES) {
+    return res.status(429).json({
+      error: `Please wait ${SPAM_INTERVAL_MINUTES} minutes before submitting again for the same station and fuel product.`,
+    });
   }
 
   const proof_image_path = req.file ? `/uploads/${req.file.filename}` : null;

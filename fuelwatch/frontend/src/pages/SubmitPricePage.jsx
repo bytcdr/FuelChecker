@@ -2,14 +2,12 @@ import React, { useState, useEffect } from 'react';
 import { useParams, useNavigate, Link } from 'react-router-dom';
 import { stationsApi } from '../api/stations.js';
 import { submissionsApi } from '../api/submissions.js';
-import { useAuth } from '../hooks/useAuth.js';
 import client from '../api/client.js';
 import LoadingSpinner from '../components/common/LoadingSpinner.jsx';
 
 export default function SubmitPricePage() {
   const { stationId } = useParams();
   const navigate = useNavigate();
-  const { user } = useAuth();
   const [stations, setStations] = useState([]);
   const [products, setProducts] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -199,10 +197,6 @@ export default function SubmitPricePage() {
 
         <div className="alert alert-info" style={{ marginTop: '16px' }}>
           💡 Your submission will be reviewed by a moderator before it's displayed publicly.
-          {user
-            ? <span> Submitted as <strong>{user.name}</strong>.</span>
-            : <span> Submitting anonymously. <Link to="/register">Create an account</Link> to track your submissions.</span>
-          }
         </div>
       </div>
     </div>

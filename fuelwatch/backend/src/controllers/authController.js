@@ -4,6 +4,8 @@ const { validationResult } = require('express-validator');
 const db = require('../config/database');
 const { newId, now } = require('../utils/helpers');
 
+const FRONTEND_URL = process.env.FRONTEND_URL || 'http://localhost:3000';
+
 function signToken(user) {
   return jwt.sign(
     { id: user.id, role: user.role },
@@ -12,6 +14,8 @@ function signToken(user) {
   );
 }
 
+// ─── Local auth (kept for admin bootstrap) ───────────────────────────────────
+
 async function register(req, res) {
   const errors = validationResult(req);
   if (!errors.isEmpty()) {
@@ -19,7 +23,6 @@ async function register(req, res) {
   }
 
   const { name, email, password } = req.body;
-
   const existing = db.prepare('SELECT id FROM users WHERE email = ?').get(email);
   if (existing) {
     return res.status(409).json({ error: 'Email is already registered.' });
@@ -36,7 +39,6 @@ async function register(req, res) {
 
   const user = db.prepare('SELECT id, name, email, role FROM users WHERE id = ?').get(id);
   const token = signToken(user);
-
   return res.status(201).json({ user, token });
 }
 
@@ -49,7 +51,7 @@ async function login(req, res) {
   const { email, password } = req.body;
   const user = db.prepare('SELECT * FROM users WHERE email = ? AND is_active = 1').get(email);
 
-  if (!user) {
+  if (!user || !user.password_hash) {
     return res.status(401).json({ error: 'Invalid email or password.' });
   }
 
@@ -69,4 +71,30 @@ function me(req, res) {
   res.json({ user: req.user });
 }
 
-module.exports = { register, login, me };
+// ─── OAuth callbacks ──────────────────────────────────────────────────────────
+
+/**
+ * Called after any successful OAuth strategy.
+ * Issues a JWT and redirects back to the frontend callback page.
+ */
+function oauthSuccess(req, res) {
+  if (!req.user) {
+    return res.redirect(`${FRONTEND_URL}/auth/callback?error=oauth_failed`);
+  }
+
+  const token = signToken(req.user);
+  const name = encodeURIComponent(req.user.name || '');
+  const role = req.user.role;
+
+  // Pass token + basic info to frontend via query params (short-lived, frontend extracts immediately)
+  res.redirect(`${FRONTEND_URL}/auth/callback?token=${token}&name=${name}&role=${role}`);
+}
+
+/**
+ * Called when OAuth fails or the user cancels.
+ */
+function oauthFailure(req, res) {
+  res.redirect(`${FRONTEND_URL}/auth/callback?error=oauth_cancelled`);
+}
+
+module.exports = { register, login, me, oauthSuccess, oauthFailure };

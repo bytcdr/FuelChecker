@@ -10,6 +10,7 @@ import StationDetailsPage from './pages/StationDetailsPage.jsx';
 import MapPage from './pages/MapPage.jsx';
 import LoginPage from './pages/LoginPage.jsx';
 import RegisterPage from './pages/RegisterPage.jsx';
+import OAuthCallbackPage from './pages/OAuthCallbackPage.jsx';
 import ProfilePage from './pages/ProfilePage.jsx';
 import SubmitPricePage from './pages/SubmitPricePage.jsx';
 
@@ -34,6 +35,9 @@ export default function App() {
     <BrowserRouter>
       <AuthProvider>
         <Routes>
+          {/* OAuth callback — no layout wrapper, full-screen spinner */}
+          <Route path="/auth/callback" element={<OAuthCallbackPage />} />
+
           {/* Public routes */}
           <Route element={<MainLayout />}>
             <Route path="/" element={<HomePage />} />
@@ -49,8 +53,12 @@ export default function App() {
             <Route path="/profile" element={
               <ProtectedRoute><ProfilePage /></ProtectedRoute>
             } />
-            <Route path="/submit-price" element={<SubmitPricePage />} />
-            <Route path="/submit-price/:stationId" element={<SubmitPricePage />} />
+            <Route path="/submit-price" element={
+              <ProtectedRoute><SubmitPricePage /></ProtectedRoute>
+            } />
+            <Route path="/submit-price/:stationId" element={
+              <ProtectedRoute><SubmitPricePage /></ProtectedRoute>
+            } />
           </Route>
 
           {/* Admin routes */}

@@ -57,7 +57,7 @@ export default function HomePage() {
             <Link to="/map" className="btn" style={{ background: 'rgba(255,255,255,0.2)', color: '#fff', border: '1.5px solid rgba(255,255,255,0.4)' }}>
               🗺️ View Map
             </Link>
-            <Link to="/submit-price" className="btn" style={{ background: 'rgba(255,255,255,0.2)', color: '#fff', border: '1.5px solid rgba(255,255,255,0.4)' }}>
+            <Link to="/login" className="btn" style={{ background: 'rgba(255,255,255,0.2)', color: '#fff', border: '1.5px solid rgba(255,255,255,0.4)' }}>
               📝 Submit a Price
             </Link>
           </div>
@@ -109,7 +109,7 @@ export default function HomePage() {
             {[
               { icon: '🔍', title: 'Browse Stations', desc: 'Find fuel stations in Tuguegarao on the map or in the list view.' },
               { icon: '📋', title: 'Check Prices', desc: 'See the latest community-reported prices for each fuel type.' },
-              { icon: '📝', title: 'Contribute', desc: 'Register and submit price updates at your local station.' },
+              { icon: '📝', title: 'Contribute', desc: 'Sign in with Google, Facebook, or Apple and submit price updates at your local station.' },
             ].map(({ icon, title, desc }) => (
               <div key={title} className="card" style={{ textAlign: 'center' }}>
                 <div style={{ fontSize: '2.5rem', marginBottom: '12px' }}>{icon}</div>

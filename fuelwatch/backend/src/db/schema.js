@@ -4,10 +4,12 @@ const schema = `
   CREATE TABLE IF NOT EXISTS users (
     id TEXT PRIMARY KEY,
     name TEXT NOT NULL,
-    email TEXT NOT NULL UNIQUE,
-    password_hash TEXT NOT NULL,
+    email TEXT UNIQUE,
+    password_hash TEXT NOT NULL DEFAULT '',
     role TEXT NOT NULL DEFAULT 'user',
     is_active INTEGER NOT NULL DEFAULT 1,
+    provider TEXT,
+    provider_id TEXT,
     created_at TEXT NOT NULL DEFAULT (datetime('now')),
     updated_at TEXT NOT NULL DEFAULT (datetime('now'))
   );
@@ -95,6 +97,16 @@ const schema = `
 
 function runMigrations() {
   db.exec(schema);
+
+  // Additive migrations for existing databases — safe to run repeatedly
+  const addColumns = [
+    "ALTER TABLE users ADD COLUMN provider TEXT",
+    "ALTER TABLE users ADD COLUMN provider_id TEXT",
+  ];
+  for (const sql of addColumns) {
+    try { db.exec(sql); } catch { /* column already exists */ }
+  }
+
   console.log('Database migrations applied successfully.');
 }
 

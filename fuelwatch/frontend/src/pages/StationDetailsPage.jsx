@@ -3,6 +3,7 @@ import { useParams, Link } from 'react-router-dom';
 import { stationsApi } from '../api/stations.js';
 import { pricesApi } from '../api/prices.js';
 import { reportsApi } from '../api/reports.js';
+import { useAuth } from '../hooks/useAuth.js';
 import PriceTable from '../components/stations/PriceTable.jsx';
 import PriceHistory from '../components/stations/PriceHistory.jsx';
 import MapComponent from '../components/map/MapComponent.jsx';
@@ -11,6 +12,7 @@ import { formatDateTime } from '../utils/formatters.js';
 
 export default function StationDetailsPage() {
   const { id } = useParams();
+  const { user } = useAuth();
   const [station, setStation] = useState(null);
   const [prices, setPrices] = useState([]);
   const [history, setHistory] = useState([]);
@@ -82,9 +84,15 @@ export default function StationDetailsPage() {
               )}
             </div>
             <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
-              <Link to={`/submit-price/${id}`} className="btn btn-primary">
-                📝 Submit Price Update
-              </Link>
+              {user ? (
+                <Link to={`/submit-price/${id}`} className="btn btn-primary">
+                  📝 Submit Price Update
+                </Link>
+              ) : (
+                <Link to="/login" className="btn btn-primary">
+                  Sign in to Submit Price
+                </Link>
+              )}
             </div>
           </div>
         </div>
