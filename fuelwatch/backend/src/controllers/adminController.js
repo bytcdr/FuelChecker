@@ -1,7 +1,8 @@
 const db = require('../config/database');
 
 function getDashboard(req, res) {
-  const totalStations = db.prepare("SELECT COUNT(*) AS count FROM stations WHERE is_active = 1").get().count;
+  const totalStations = db.prepare("SELECT COUNT(*) AS count FROM stations WHERE is_active = 1 AND status = 'approved'").get().count;
+  const pendingStations = db.prepare("SELECT COUNT(*) AS count FROM stations WHERE status = 'pending'").get().count;
   const totalUsers = db.prepare("SELECT COUNT(*) AS count FROM users WHERE role = 'user' AND is_active = 1").get().count;
   const pendingSubmissions = db.prepare("SELECT COUNT(*) AS count FROM price_submissions WHERE status = 'pending'").get().count;
   const totalSubmissions = db.prepare("SELECT COUNT(*) AS count FROM price_submissions").get().count;
@@ -24,6 +25,7 @@ function getDashboard(req, res) {
   return res.json({
     stats: {
       total_stations: totalStations,
+      pending_stations: pendingStations,
       total_users: totalUsers,
       pending_submissions: pendingSubmissions,
       total_submissions: totalSubmissions,

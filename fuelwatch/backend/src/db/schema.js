@@ -25,6 +25,9 @@ const schema = `
     latitude REAL NOT NULL,
     longitude REAL NOT NULL,
     is_active INTEGER NOT NULL DEFAULT 1,
+    status TEXT NOT NULL DEFAULT 'approved',
+    submitted_by TEXT,
+    rejection_note TEXT,
     created_at TEXT NOT NULL DEFAULT (datetime('now')),
     updated_at TEXT NOT NULL DEFAULT (datetime('now'))
   );
@@ -102,6 +105,9 @@ function runMigrations() {
   const addColumns = [
     "ALTER TABLE users ADD COLUMN provider TEXT",
     "ALTER TABLE users ADD COLUMN provider_id TEXT",
+    "ALTER TABLE stations ADD COLUMN status TEXT NOT NULL DEFAULT 'approved'",
+    "ALTER TABLE stations ADD COLUMN submitted_by TEXT",
+    "ALTER TABLE stations ADD COLUMN rejection_note TEXT",
   ];
   for (const sql of addColumns) {
     try { db.exec(sql); } catch { /* column already exists */ }

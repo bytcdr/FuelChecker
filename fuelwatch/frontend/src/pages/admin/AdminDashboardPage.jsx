@@ -55,8 +55,8 @@ export default function AdminDashboardPage() {
 
       <div className="grid-4" style={{ marginBottom: '32px' }}>
         <StatCard icon="⛽" label="Active Stations" value={stats.total_stations} />
-        <StatCard icon="👥" label="Registered Users" value={stats.total_users} />
-        <StatCard icon="⏳" label="Pending Submissions" value={stats.pending_submissions} color={stats.pending_submissions > 0 ? 'var(--color-warning)' : 'var(--color-success)'} />
+        <StatCard icon="🕐" label="Pending Stations" value={stats.pending_stations ?? 0} color={(stats.pending_stations ?? 0) > 0 ? 'var(--color-warning)' : 'var(--color-success)'} />
+        <StatCard icon="⏳" label="Pending Prices" value={stats.pending_submissions} color={stats.pending_submissions > 0 ? 'var(--color-warning)' : 'var(--color-success)'} />
         <StatCard icon="🚩" label="Open Reports" value={stats.open_reports} color={stats.open_reports > 0 ? 'var(--color-danger)' : 'var(--color-success)'} />
       </div>
 

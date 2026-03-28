@@ -33,6 +33,7 @@ export default function Header() {
           {[
             { to: '/', label: 'Home', exact: true },
             { to: '/stations', label: 'Stations' },
+            { to: '/submit-station', label: 'Submit Station' },
             { to: '/map', label: 'Map' },
           ].map(({ to, label, exact }) => (
             <NavLink

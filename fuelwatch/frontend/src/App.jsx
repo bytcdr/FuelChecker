@@ -13,6 +13,7 @@ import RegisterPage from './pages/RegisterPage.jsx';
 import OAuthCallbackPage from './pages/OAuthCallbackPage.jsx';
 import ProfilePage from './pages/ProfilePage.jsx';
 import SubmitPricePage from './pages/SubmitPricePage.jsx';
+import SubmitStationPage from './pages/SubmitStationPage.jsx';
 
 import AdminDashboardPage from './pages/admin/AdminDashboardPage.jsx';
 import AdminStationsPage from './pages/admin/AdminStationsPage.jsx';
@@ -53,12 +54,15 @@ export default function App() {
             <Route path="/profile" element={
               <ProtectedRoute><ProfilePage /></ProtectedRoute>
             } />
-            <Route path="/submit-price" element={
-              <ProtectedRoute><SubmitPricePage /></ProtectedRoute>
-            } />
-            <Route path="/submit-price/:stationId" element={
-              <ProtectedRoute><SubmitPricePage /></ProtectedRoute>
-            } />
+                <Route path="/submit-price" element={
+                  <ProtectedRoute><SubmitPricePage /></ProtectedRoute>
+                } />
+                <Route path="/submit-price/:stationId" element={
+                  <ProtectedRoute><SubmitPricePage /></ProtectedRoute>
+                } />
+                <Route path="/submit-station" element={
+                  <ProtectedRoute><SubmitStationPage /></ProtectedRoute>
+                } />
           </Route>
 
           {/* Admin routes */}
