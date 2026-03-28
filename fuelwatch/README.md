@@ -1,4 +1,4 @@
-# FuelWatch Tuguegarao
+# FuelWatch Tuguegarao  -- SAMPLE
 
 Community-powered fuel price tracking platform for Tuguegarao, Cagayan, Philippines.
 
