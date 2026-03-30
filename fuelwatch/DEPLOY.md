@@ -65,6 +65,24 @@ npm install
 cd ..
 ```
 
+Important: do not copy/upload `node_modules` from your local machine.
+`better-sqlite3` contains a native binary, and copying it can cause errors like `invalid ELF header` on the VPS.
+Always run `npm install` on the VPS so native dependencies are built for Linux.
+
+If you already copied `node_modules` and see:
+`better_sqlite3.node: invalid ELF header`
+
+run this on the VPS:
+
+```bash
+cd /var/www/fuelwatch/backend
+rm -rf node_modules
+sudo apt-get update
+sudo apt-get install -y build-essential python3 make g++ libsqlite3-dev
+npm install
+npm run setup
+```
+
 ---
 
 ## 2. Configure the Backend `.env`
