@@ -49,17 +49,17 @@ export default function StationsPage() {
         <div className="section-header">
           <div>
             <h1>Fuel Stations</h1>
-            <p style={{ marginTop: '4px' }}>Tuguegarao, Cagayan · {!loading && `${stations.length} stations found`}</p>
+            <p style={{ marginTop: '4px' }}>{!loading && `${stations.length} stations found`}</p>
           </div>
         </div>
 
         {/* Search & Filters */}
-        <div className="card" style={{ marginBottom: '24px', padding: '16px' }}>
-          <div style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
+        <div className="card" style={{ marginBottom: '20px', padding: '14px' }}>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
             <SearchBar
               value={filters.search}
               onChange={(v) => setFilters((f) => ({ ...f, search: v }))}
-              placeholder="Search station name, brand, or barangay..."
+              placeholder="Search station name or brand..."
             />
             <StationFilters
               filters={filters}
