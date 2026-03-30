@@ -20,8 +20,8 @@ const schema = `
     brand TEXT,
     address TEXT,
     barangay TEXT,
-    city TEXT NOT NULL DEFAULT 'Tuguegarao',
-    province TEXT NOT NULL DEFAULT 'Cagayan',
+    city TEXT,
+    province TEXT NOT NULL DEFAULT 'Philippines',
     latitude REAL NOT NULL,
     longitude REAL NOT NULL,
     is_active INTEGER NOT NULL DEFAULT 1,
@@ -111,6 +111,44 @@ function runMigrations() {
   ];
   for (const sql of addColumns) {
     try { db.exec(sql); } catch { /* column already exists */ }
+  }
+
+  // Widen city/province columns to allow NULL (SQLite requires table recreation)
+  const cityInfo = db.prepare("PRAGMA table_info(stations)").all();
+  const cityCol  = cityInfo.find((c) => c.name === 'city');
+  if (cityCol && cityCol.notnull === 1) {
+    db.exec(`
+      PRAGMA foreign_keys=OFF;
+      BEGIN;
+      CREATE TABLE stations_migrated (
+        id           TEXT PRIMARY KEY,
+        name         TEXT NOT NULL,
+        brand        TEXT,
+        address      TEXT,
+        barangay     TEXT,
+        city         TEXT,
+        province     TEXT NOT NULL DEFAULT 'Philippines',
+        latitude     REAL NOT NULL,
+        longitude    REAL NOT NULL,
+        is_active    INTEGER NOT NULL DEFAULT 1,
+        status       TEXT NOT NULL DEFAULT 'approved',
+        submitted_by TEXT,
+        rejection_note TEXT,
+        created_at   TEXT NOT NULL DEFAULT (datetime('now')),
+        updated_at   TEXT NOT NULL DEFAULT (datetime('now'))
+      );
+      INSERT INTO stations_migrated SELECT
+        id, name, brand, address, barangay,
+        NULLIF(TRIM(city), ''), COALESCE(NULLIF(TRIM(province), ''), 'Philippines'),
+        latitude, longitude, is_active, status, submitted_by, rejection_note,
+        created_at, updated_at
+      FROM stations;
+      DROP TABLE stations;
+      ALTER TABLE stations_migrated RENAME TO stations;
+      CREATE INDEX IF NOT EXISTS idx_stations_active ON stations(is_active);
+      COMMIT;
+      PRAGMA foreign_keys=ON;
+    `);
   }
 
   console.log('Database migrations applied successfully.');

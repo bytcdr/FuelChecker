@@ -33,17 +33,17 @@ export default function HomePage() {
         <div className="container" style={{ textAlign: 'center' }}>
           <div style={{ fontSize: '3rem', marginBottom: '16px' }}>⛽</div>
           <h1 style={{ color: '#fff', fontSize: '2.5rem', marginBottom: '12px' }}>
-            FuelWatch Tuguegarao
+            FuelWatch Philippines
           </h1>
           <p style={{ color: '#bfdbfe', fontSize: '1.15rem', maxWidth: '520px', margin: '0 auto 32px' }}>
-            Community-powered fuel price tracking for Tuguegarao, Cagayan.
+            Community-powered fuel price tracking for Regions I, II & CAR.
             Find the best prices near you.
           </p>
           <form onSubmit={handleSearch} style={{ display: 'flex', gap: '12px', maxWidth: '480px', margin: '0 auto' }}>
             <input
               type="text"
               className="form-control"
-              placeholder="Search stations, brands, or barangay..."
+              placeholder="Search stations, brands, or city..."
               value={search}
               onChange={(e) => setSearch(e.target.value)}
               style={{ flex: 1, background: 'rgba(255,255,255,0.95)' }}
@@ -68,9 +68,9 @@ export default function HomePage() {
       <section style={{ background: 'var(--color-surface)', borderBottom: '1px solid var(--color-border)', padding: '20px 0' }}>
         <div className="container" style={{ display: 'flex', justifyContent: 'center', gap: '48px', flexWrap: 'wrap' }}>
           {[
-            { icon: '⛽', label: 'Active Stations', value: featuredStations.length > 0 ? '15+' : '—' },
+          { icon: '⛽', label: 'Active Stations', value: featuredStations.length > 0 ? '1,400+' : '—' },
             { icon: '💰', label: 'Fuel Products', value: '5' },
-            { icon: '👥', label: 'City', value: 'Tuguegarao' },
+            { icon: '📍', label: 'Regions Covered', value: 'I, II & CAR' },
           ].map(({ icon, label, value }) => (
             <div key={label} style={{ textAlign: 'center' }}>
               <div style={{ fontSize: '1.5rem' }}>{icon}</div>
@@ -107,9 +107,9 @@ export default function HomePage() {
           <h2 style={{ textAlign: 'center', marginBottom: '32px' }}>How FuelWatch Works</h2>
           <div className="grid-3">
             {[
-              { icon: '🔍', title: 'Browse Stations', desc: 'Find fuel stations in Tuguegarao on the map or in the list view.' },
+              { icon: '🔍', title: 'Browse Stations', desc: 'Find fuel stations across Regions I, II & CAR on the map or in the list view.' },
               { icon: '📋', title: 'Check Prices', desc: 'See the latest community-reported prices for each fuel type.' },
-              { icon: '📝', title: 'Contribute', desc: 'Sign in with Google, Facebook, or Apple and submit price updates at your local station.' },
+              { icon: '📝', title: 'Contribute', desc: 'Sign in and submit price updates at your local station to help the community.' },
             ].map(({ icon, title, desc }) => (
               <div key={title} className="card" style={{ textAlign: 'center' }}>
                 <div style={{ fontSize: '2.5rem', marginBottom: '12px' }}>{icon}</div>

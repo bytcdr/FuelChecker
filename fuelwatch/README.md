@@ -56,6 +56,8 @@ fuelwatch/
 
 ## Quick Start (Local Setup)
 
+**Deploying on a VPS?** See [DEPLOY.md](DEPLOY.md) for a full step-by-step guide (Nginx, PM2, HTTPS, firewall).
+
 ### 1. Clone / navigate to the project
 
 ```bash

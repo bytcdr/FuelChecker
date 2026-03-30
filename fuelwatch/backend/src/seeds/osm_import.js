@@ -1,9 +1,17 @@
 /**
  * osm_import.js
  *
- * Fetches all fuel/gas stations in Tuguegarao City from OpenStreetMap
- * via the Overpass API, wipes existing station data, and imports the
- * real-world records as approved stations.
+ * Fetches all fuel/gas stations in Regions I, II, III and CAR (Northern &
+ * Central Luzon) from OpenStreetMap via the Overpass API, wipes existing
+ * station data, and imports the real-world records as approved stations.
+ *
+ * Coverage:
+ *   Region I   (Ilocos)         – Ilocos Norte, Ilocos Sur, La Union, Pangasinan
+ *   Region II  (Cagayan Valley) – Batanes, Cagayan, Isabela, Nueva Vizcaya, Quirino
+ *   Region III (Central Luzon)  – Aurora, Bataan, Bulacan, Nueva Ecija, Pampanga,
+ *                                  Tarlac, Zambales
+ *   CAR        (Cordillera)     – Abra, Apayao, Benguet, Ifugao, Kalinga,
+ *                                  Mountain Province
  *
  * Usage:
  *   node src/seeds/osm_import.js
@@ -17,28 +25,41 @@ const db      = require('../config/database');
 const { runMigrations } = require('../db/schema');
 const { newId, now } = require('../utils/helpers');
 
-// ─── Bounding box for Tuguegarao City (slightly generous) ────────────────────
-const BBOX = {
-  south: 17.540,
-  west:  121.660,
-  north: 17.690,
-  east:  121.830,
-};
+// ─── Bounding box for Regions I, II & CAR (Northern Luzon) ─────────────────
+// South: bottom of Pangasinan (Region I); North: Batanes tip (Region II);
+// West: Ilocos coast; East: Cagayan/Isabela east coast.
+const REGION_BBOXES = [
+  { name: 'Regions I, II & CAR', south: 15.5, west: 119.5, north: 20.8, east: 122.6 },
+];
+
+// Provinces in scope — used to reject stations whose OSM province tag falls
+// outside the three target regions even if they slip inside the bbox.
+const ALLOWED_PROVINCES = new Set([
+  // Region I – Ilocos
+  'ilocos norte', 'ilocos sur', 'la union', 'pangasinan',
+  // Region II – Cagayan Valley
+  'batanes', 'cagayan', 'isabela', 'nueva vizcaya', 'quirino',
+  // CAR – Cordillera Administrative Region
+  'abra', 'apayao', 'benguet', 'ifugao', 'kalinga', 'mountain province',
+]);
 
 // ─── Brand name normalisation ─────────────────────────────────────────────────
 const BRAND_MAP = [
-  [/petron/i,   'Petron'],
-  [/shell/i,    'Shell'],
-  [/caltex/i,   'Caltex'],
-  [/phoenix/i,  'Phoenix'],
-  [/\bptt\b/i,  'PTT'],
-  [/flying.?v/i,'Flying V'],
-  [/seaoil/i,   'Seaoil'],
-  [/jetti/i,    'Jetti'],
-  [/total/i,    'Total'],
-  [/unioil/i,   'Unioil'],
-  [/clean.?fuel/i, 'Clean Fuel'],
-  [/duramax/i,  'Duramax'],
+  [/petron/i,        'Petron'],
+  [/shell/i,         'Shell'],
+  [/caltex/i,        'Caltex'],
+  [/phoenix/i,       'Phoenix'],
+  [/\bptt\b/i,       'PTT'],
+  [/flying.?v/i,     'Flying V'],
+  [/seaoil/i,        'Seaoil'],
+  [/jetti/i,         'Jetti'],
+  [/total/i,         'Total'],
+  [/unioil/i,        'Unioil'],
+  [/clean.?fuel/i,   'Clean Fuel'],
+  [/duramax/i,       'Duramax'],
+  [/eastern.?pet/i,  'Eastern Petroleum'],
+  [/pnoc/i,          'PNOC'],
+  [/filoil/i,        'FilOil'],
 ];
 
 function normaliseBrand(raw) {
@@ -46,7 +67,6 @@ function normaliseBrand(raw) {
   for (const [re, canonical] of BRAND_MAP) {
     if (re.test(raw)) return canonical;
   }
-  // Return the raw brand capitalised if it's reasonably short
   return raw.length <= 30 ? raw : null;
 }
 
@@ -74,11 +94,24 @@ function buildBarangay(tags) {
       || null;
 }
 
-// ─── Overpass query ───────────────────────────────────────────────────────────
-function buildQuery() {
-  const { south, west, north, east } = BBOX;
+function buildCity(tags) {
+  return tags['addr:city']
+      || tags['addr:town']
+      || tags['addr:municipality']
+      || null;
+}
+
+function buildProvince(tags) {
+  return tags['addr:province']
+      || tags['addr:state']
+      || tags['addr:county']
+      || null;
+}
+
+// ─── Overpass query for a single bounding box ─────────────────────────────────
+function buildQuery({ south, west, north, east }) {
   const bbox = `${south},${west},${north},${east}`;
-  return `[out:json][timeout:60];
+  return `[out:json][timeout:120];
 (
   node["amenity"="fuel"](${bbox});
   way["amenity"="fuel"](${bbox});
@@ -87,40 +120,61 @@ function buildQuery() {
 out center tags;`;
 }
 
-async function fetchOSM() {
-  const query = buildQuery();
+const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+
+async function fetchRegion(region, retries = 3) {
+  const query = buildQuery(region);
   const url   = 'https://overpass-api.de/api/interpreter';
 
-  console.log('\n[OSM] Querying Overpass API …');
-  console.log(`[OSM] Bounding box: ${BBOX.south},${BBOX.west} → ${BBOX.north},${BBOX.east}`);
+  console.log(`\n[OSM] Querying ${region.name} (${region.south},${region.west} → ${region.north},${region.east}) …`);
 
-  const res = await fetch(url, {
-    method:  'POST',
-    headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-    body:    `data=${encodeURIComponent(query)}`,
-  });
+  for (let attempt = 1; attempt <= retries; attempt++) {
+    const res = await fetch(url, {
+      method:  'POST',
+      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+      body:    `data=${encodeURIComponent(query)}`,
+    });
 
-  if (!res.ok) {
-    throw new Error(`Overpass API returned ${res.status}: ${await res.text()}`);
+    if (res.status === 429) {
+      const wait = attempt * 15000;
+      console.log(`[OSM] Rate-limited. Waiting ${wait / 1000}s before retry ${attempt}/${retries} …`);
+      await sleep(wait);
+      continue;
+    }
+
+    if (!res.ok) {
+      throw new Error(`Overpass API returned ${res.status} for ${region.name}: ${await res.text()}`);
+    }
+
+    const json = await res.json();
+    const elements = json.elements || [];
+    console.log(`[OSM] ${region.name}: ${elements.length} raw element(s).`);
+    return elements;
   }
 
-  const json = await res.json();
-  return json.elements || [];
+  throw new Error(`All ${retries} attempts failed for ${region.name} (rate limited).`);
 }
 
 // ─── Parse OSM element → station row ─────────────────────────────────────────
 function parseElement(el) {
   const tags = el.tags || {};
 
-  // Coordinates: nodes have lat/lon directly; ways/relations expose a center
   const lat = el.lat  ?? el.center?.lat;
   const lon = el.lon  ?? el.center?.lon;
 
-  if (!lat || !lon) return null;           // skip if no position
-  if (tags.access === 'private') return null; // skip private stations
+  if (!lat || !lon) return null;
+  if (tags.access === 'private') return null;
 
   const name = tags.name || tags['name:en'] || null;
-  if (!name) return null;                  // skip unnamed features
+  if (!name) return null;
+
+  const province = buildProvince(tags) || 'Philippines';
+
+  // If the element has a province tag, reject it if it's outside scope.
+  // Elements without a province tag are kept (they're inside the bbox).
+  if (buildProvince(tags) && !ALLOWED_PROVINCES.has(province.toLowerCase())) {
+    return null;
+  }
 
   return {
     osm_id:   `${el.type}/${el.id}`,
@@ -128,8 +182,8 @@ function parseElement(el) {
     brand:    detectBrand(tags),
     address:  buildAddress(tags),
     barangay: buildBarangay(tags),
-    city:     tags['addr:city'] || 'Tuguegarao',
-    province: tags['addr:province'] || 'Cagayan',
+    city:     buildCity(tags) || null,          // nullable after migration
+    province,                                   // NOT NULL fallback
     latitude:  lat,
     longitude: lon,
   };
@@ -138,7 +192,6 @@ function parseElement(el) {
 // ─── Database operations ──────────────────────────────────────────────────────
 function clearExistingStations() {
   console.log('\n[DB] Clearing existing station data …');
-  // Delete in FK-safe order
   db.exec("DELETE FROM displayed_prices");
   db.exec("DELETE FROM price_submissions");
   db.exec("DELETE FROM reports WHERE station_id IS NOT NULL");
@@ -172,31 +225,49 @@ function importStations(stations) {
 // ─── Main ─────────────────────────────────────────────────────────────────────
 async function main() {
   console.log('═══════════════════════════════════════════════════════');
-  console.log('  FuelWatch — OpenStreetMap Station Import');
+  console.log('  FuelWatch — OSM Import: Regions I, II & CAR');
   console.log('═══════════════════════════════════════════════════════');
 
   runMigrations();
 
-  let elements;
-  try {
-    elements = await fetchOSM();
-  } catch (err) {
-    console.error('\n[Error] Failed to fetch from Overpass API:', err.message);
-    console.error('Make sure you have internet access and try again.');
-    process.exit(1);
+  // Fetch all regions, deduplicating by OSM element id
+  const seen     = new Map();  // osm_id → parsed station
+  let totalRaw   = 0;
+
+  for (let i = 0; i < REGION_BBOXES.length; i++) {
+    const region = REGION_BBOXES[i];
+    if (i > 0) {
+      console.log('[OSM] Pausing 10s between regions to respect rate limits…');
+      await sleep(10000);
+    }
+    let elements;
+    try {
+      elements = await fetchRegion(region);
+    } catch (err) {
+      console.error(`[Error] Failed to fetch ${region.name}:`, err.message);
+      console.error('Skipping this region and continuing…');
+      continue;
+    }
+    totalRaw += elements.length;
+
+    for (const el of elements) {
+      const osmId = `${el.type}/${el.id}`;
+      if (seen.has(osmId)) continue;       // deduplicate overlap zones
+      const parsed = parseElement(el);
+      if (parsed) seen.set(osmId, parsed);
+    }
   }
 
-  console.log(`[OSM] Retrieved ${elements.length} raw element(s).`);
+  const stations = [...seen.values()];
 
-  const stations = elements.map(parseElement).filter(Boolean);
-  console.log(`[OSM] ${stations.length} valid station(s) after filtering.`);
+  console.log(`\n[OSM] ${totalRaw} raw element(s) fetched across all regions.`);
+  console.log(`[OSM] ${stations.length} unique valid station(s) after deduplication & filtering.`);
 
   if (stations.length === 0) {
     console.warn('[Warning] No stations found. The database will NOT be cleared.');
     process.exit(0);
   }
 
-  // Preview
   console.log('\n[Preview] First 10 stations:');
   stations.slice(0, 10).forEach((s, i) =>
     console.log(`  ${i + 1}. ${s.name.padEnd(40)} ${s.brand || '—'} (${s.latitude.toFixed(4)}, ${s.longitude.toFixed(4)})`),

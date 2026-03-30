@@ -3,10 +3,10 @@ import maplibregl from 'maplibre-gl';
 import 'maplibre-gl/dist/maplibre-gl.css';
 
 const DEFAULT_CENTER = [
-  parseFloat(import.meta.env.VITE_MAP_CENTER_LNG || '121.7270'),
-  parseFloat(import.meta.env.VITE_MAP_CENTER_LAT || '17.6132'),
+  parseFloat(import.meta.env.VITE_MAP_CENTER_LNG || '121.0000'),
+  parseFloat(import.meta.env.VITE_MAP_CENTER_LAT || '17.5000'),
 ];
-const DEFAULT_ZOOM = parseFloat(import.meta.env.VITE_MAP_DEFAULT_ZOOM || '13');
+const DEFAULT_ZOOM = parseFloat(import.meta.env.VITE_MAP_DEFAULT_ZOOM || '8');
 const TILE_URL = import.meta.env.VITE_MAP_TILE_URL || 'https://tile.openstreetmap.org/{z}/{x}/{y}.png';
 const TILE_ATTRIBUTION = import.meta.env.VITE_MAP_TILE_ATTRIBUTION || '© OpenStreetMap Contributors';
 
@@ -87,6 +87,7 @@ export default function MapComponent({
   radiusCircle,
   userLocation,
   selectedId,
+  fitBounds,      // [[west, south], [east, north]] — when set, map fits to these bounds
 }) {
   const mapContainerRef = useRef(null);
   const mapRef          = useRef(null);
@@ -105,7 +106,7 @@ export default function MapComponent({
     });
 
     mapRef.current.addControl(new maplibregl.NavigationControl(), 'top-right');
-    mapRef.current.addControl(new maplibregl.ScaleControl({ unit: 'metric' }), 'bottom-left');
+    // ScaleControl removed — a fixed radius badge is shown instead
 
     // Prepare radius circle sources/layers once map loads
     mapRef.current.on('load', () => {
@@ -123,6 +124,20 @@ export default function MapComponent({
       mapRef.current = null;
     };
   }, []);
+
+  // ── Fly to new centre/zoom when props change after init ─────────────────────
+  useEffect(() => {
+    const map = mapRef.current;
+    if (!map || !center) return;
+    map.flyTo({ center, zoom: zoom || DEFAULT_ZOOM, speed: 1.4 });
+  }, [center, zoom]);
+
+  // ── Fit map to a bounding box (e.g. after city search) ───────────────────────
+  useEffect(() => {
+    const map = mapRef.current;
+    if (!map || !fitBounds) return;
+    map.fitBounds(fitBounds, { padding: 60, maxZoom: 14, duration: 800 });
+  }, [fitBounds]);
 
   // ── Radius circle ────────────────────────────────────────────────────────────
   useEffect(() => {
@@ -176,46 +191,90 @@ export default function MapComponent({
 
       const isSelected = station.id === selectedId;
       const color      = brandColor(station.brand);
+      const size       = isSelected ? 1.25 : 1;
 
+      // ── Marker element: bare container — MapLibre owns its style.transform ──
+      // We NEVER touch el.style.transform; MapLibre overwrites it every frame
+      // with translate() positioning. All visual effects go on `wrapper` below.
       const el = document.createElement('div');
       el.setAttribute('data-station-id', station.id);
-      el.style.cssText = `
-        width: ${isSelected ? '36px' : '28px'};
-        height: ${isSelected ? '36px' : '28px'};
-        background: ${color};
-        border: ${isSelected ? '3px solid #fff' : '2px solid rgba(255,255,255,0.9)'};
-        border-radius: 50% 50% 50% 0;
-        transform: rotate(-45deg);
-        cursor: pointer;
-        box-shadow: 0 2px ${isSelected ? '12px' : '6px'} rgba(0,0,0,${isSelected ? '0.45' : '0.25'});
-        transition: all 0.15s ease;
-        z-index: ${isSelected ? 10 : 1};
+      el.style.cssText = `width: 28px; height: 38px; cursor: pointer;`;
+
+      // ── Child wrapper: we own this — scale, shadow, transitions live here ──
+      const wrapper = document.createElement('div');
+      wrapper.style.cssText = `
+        width: 28px;
+        height: 38px;
+        transform: scale(${size});
+        transform-origin: center bottom;
+        transition: transform 0.15s ease, filter 0.15s ease;
+        will-change: transform;
+        filter: drop-shadow(0 2px 4px rgba(0,0,0,0.35));
       `;
+      wrapper.innerHTML = `
+        <svg width="28" height="38" viewBox="0 0 28 38" style="overflow:visible;display:block">
+          <path d="M14 0C6.268 0 0 6.268 0 14c0 7.732 14 24 14 24s14-16.268 14-24C28 6.268 21.732 0 14 0z"
+                fill="${color}" stroke="rgba(255,255,255,0.92)" stroke-width="2"/>
+          <circle cx="14" cy="14" r="5" fill="white" opacity="0.85"/>
+        </svg>`;
+      el.appendChild(wrapper);
+
       el.onmouseenter = () => {
-        el.style.transform = 'rotate(-45deg) scale(1.2)';
-        el.style.zIndex = '10';
+        wrapper.style.transform = 'scale(1.3)';
+        wrapper.style.filter = 'drop-shadow(0 4px 8px rgba(0,0,0,0.45))';
       };
       el.onmouseleave = () => {
-        el.style.transform = 'rotate(-45deg) scale(1)';
-        el.style.zIndex = isSelected ? '10' : '1';
+        wrapper.style.transform = `scale(${size})`;
+        wrapper.style.filter = 'drop-shadow(0 2px 4px rgba(0,0,0,0.35))';
       };
 
-      const popup = new maplibregl.Popup({ offset: 28, closeButton: true, maxWidth: '280px' })
-        .setHTML(`
-          <div style="font-family:inherit;padding:2px 0">
-            <div style="font-weight:700;font-size:0.93rem;margin-bottom:3px;color:#111">${station.name}</div>
-            <div style="font-size:0.78rem;color:#64748b;margin-bottom:8px">${[station.brand, station.barangay].filter(Boolean).join(' · ')}</div>
-            <a href="/stations/${station.id}"
-               style="display:inline-block;background:${color};color:#fff;font-size:0.8rem;font-weight:600;padding:4px 12px;border-radius:6px;text-decoration:none">
-              View Prices →
-            </a>
+      const locationLine = [station.city, station.province].filter(Boolean).join(', ');
+      const popup = new maplibregl.Popup({
+        offset: 40, closeButton: true, maxWidth: '300px', closeOnClick: false,
+      }).setHTML(`
+        <div style="font-family:inherit;padding:4px 2px 2px">
+          <div style="display:flex;align-items:center;gap:7px;margin-bottom:10px">
+            <span style="width:10px;height:10px;border-radius:50%;background:${color};flex-shrink:0;display:inline-block"></span>
+            <span style="font-weight:700;font-size:1rem;color:#111;line-height:1.2">${station.name}</span>
           </div>
-        `);
+          ${station.brand ? `<span style="display:inline-block;background:${color};color:#fff;font-size:0.78rem;font-weight:700;padding:3px 10px;border-radius:999px;margin-bottom:10px">${station.brand}</span>` : ''}
+          ${locationLine ? `<div style="font-size:0.83rem;color:#64748b;margin-bottom:3px">${locationLine}</div>` : ''}
+          ${station.street ? `<div style="font-size:0.83rem;color:#64748b;margin-bottom:12px">${station.street}</div>` : '<div style="margin-bottom:12px"></div>'}
+          <a href="/stations/${station.id}"
+             style="display:block;text-align:center;background:#3b82f6;color:#fff;font-size:0.88rem;font-weight:600;padding:9px 16px;border-radius:8px;text-decoration:none;letter-spacing:0.01em">
+            View Prices →
+          </a>
+        </div>
+      `);
 
-      const marker = new maplibregl.Marker({ element: el })
+      const marker = new maplibregl.Marker({ element: el, anchor: 'bottom' })
         .setLngLat([station.longitude, station.latitude])
-        .setPopup(popup)
         .addTo(mapRef.current);
+
+      // ── Show popup on hover; keep open while mouse is over popup ───────────
+      let closeTimer = null;
+
+      const showPopup = () => {
+        clearTimeout(closeTimer);
+        if (!popup.isOpen()) {
+          popup.setLngLat([station.longitude, station.latitude]).addTo(mapRef.current);
+        }
+      };
+
+      const scheduleClose = () => {
+        closeTimer = setTimeout(() => { if (popup.isOpen()) popup.remove(); }, 220);
+      };
+
+      el.addEventListener('mouseenter', showPopup);
+      el.addEventListener('mouseleave', scheduleClose);
+
+      popup.on('open', () => {
+        const popupEl = popup.getElement();
+        if (popupEl) {
+          popupEl.addEventListener('mouseenter', () => clearTimeout(closeTimer));
+          popupEl.addEventListener('mouseleave', scheduleClose);
+        }
+      });
 
       if (onStationClick) el.addEventListener('click', () => onStationClick(station));
 
@@ -224,6 +283,20 @@ export default function MapComponent({
   }, [stations, onStationClick, selectedId]);
 
   return (
-    <div ref={mapContainerRef} style={{ width: '100%', height, borderRadius: 'var(--radius-lg)', overflow: 'hidden' }} />
+    <div style={{ position: 'relative', width: '100%', height }}>
+      <div ref={mapContainerRef} style={{ width: '100%', height, borderRadius: 'var(--radius-lg)', overflow: 'hidden' }} />
+      {radiusCircle && radiusCircle.radiusKm > 0 && (
+        <div style={{
+          position: 'absolute', bottom: '10px', left: '10px',
+          background: 'rgba(255,255,255,0.92)', backdropFilter: 'blur(4px)',
+          border: '1.5px solid #2563eb', borderRadius: '999px',
+          padding: '4px 12px', fontSize: '0.78rem', fontWeight: 700,
+          color: '#2563eb', pointerEvents: 'none', zIndex: 10,
+          boxShadow: '0 1px 4px rgba(0,0,0,0.12)',
+        }}>
+          📍 {radiusCircle.radiusKm} km radius
+        </div>
+      )}
+    </div>
   );
 }

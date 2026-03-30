@@ -23,8 +23,8 @@ export default function StationCard({ station }) {
           </span>
         </div>
         <div style={{ fontSize: '0.85rem', color: 'var(--color-text-secondary)', display: 'flex', flexDirection: 'column', gap: '4px' }}>
-          {station.barangay && (
-            <span>📍 {station.barangay}</span>
+          {(station.city || station.province) && (
+            <span>📍 {[station.city, station.province].filter(Boolean).join(', ')}</span>
           )}
           {station.address && (
             <span style={{ color: 'var(--color-text-muted)' }}>{station.address}</span>

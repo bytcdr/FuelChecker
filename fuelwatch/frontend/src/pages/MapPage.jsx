@@ -1,7 +1,9 @@
-import React, { useState, useEffect, useMemo, useCallback, useRef } from 'react';
+import React, { useState, useEffect, useMemo, useCallback } from 'react';
 import { Link } from 'react-router-dom';
 import { stationsApi } from '../api/stations.js';
+import client from '../api/client.js';
 import MapComponent from '../components/map/MapComponent.jsx';
+import CityAutocomplete from '../components/common/CityAutocomplete.jsx';
 import LoadingSpinner from '../components/common/LoadingSpinner.jsx';
 
 // ─── Haversine distance (km) ──────────────────────────────────────────────────
@@ -17,18 +19,12 @@ function haversine(lat1, lon1, lat2, lon2) {
   return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
 }
 
-const TUGUEGARAO_CENTER = [121.727, 17.6132]; // [lng, lat]
+// Default view: centre of Regions I, II & CAR (Northern Luzon)
+const REGION_CENTER = [121.0000, 17.5000]; // [lng, lat]
+const REGION_ZOOM   = 8;
 
-const RADIUS_OPTIONS = [
-  { label: 'All', km: 0 },
-  { label: '1 km', km: 1 },
-  { label: '2 km', km: 2 },
-  { label: '5 km', km: 5 },
-  { label: '10 km', km: 10 },
-  { label: '20 km', km: 20 },
-];
+const FIXED_RADIUS_KM = 2; // radius is always 2 km when using location
 
-// Brand colours for pills (must stay in sync with MapComponent)
 const BRAND_COLORS = {
   Petron: '#E31837', Shell: '#FFC200', Caltex: '#003087',
   Phoenix: '#FF6600', 'Flying V': '#008000', PTT: '#00A650',
@@ -44,249 +40,370 @@ function brandColor(brand) {
   return '#2563eb';
 }
 
+// ─── Location state machine ───────────────────────────────────────────────────
+// 'idle' | 'requesting' | 'found' | 'denied'
+
 export default function MapPage() {
-  const [allStations, setAllStations]   = useState([]);
-  const [loading, setLoading]           = useState(true);
-  const [error, setError]               = useState('');
-  const [selected, setSelected]         = useState(null);
+  // ── Data ──────────────────────────────────────────────────────────────────
+  const [stations, setStations]           = useState([]);
+  const [fuelProducts, setFuelProducts]   = useState([]);
+  const [loading, setLoading]             = useState(false);
+  const [error, setError]                 = useState('');
+  const [selected, setSelected]           = useState(null);
 
-  // ── Filters ─────────────────────────────────────────────────────────────────
-  const [searchText, setSearchText]         = useState('');
-  const [activeBrands, setActiveBrands]     = useState(new Set());  // empty = all
-  const [radiusKm, setRadiusKm]             = useState(0);
-  const [radiusCenter, setRadiusCenter]     = useState(TUGUEGARAO_CENTER); // [lng, lat]
-  const [usingMyLocation, setUsingMyLocation] = useState(false);
-  const [locating, setLocating]             = useState(false);
-  const [filtersOpen, setFiltersOpen]       = useState(true);
+  // ── Location ──────────────────────────────────────────────────────────────
+  const [locState, setLocState]           = useState('idle');   // idle|requesting|found|denied
+  const [userCoords, setUserCoords]       = useState(null);     // [lng, lat]
 
-  // ── Load all stations once ───────────────────────────────────────────────────
+  // ── Filters ───────────────────────────────────────────────────────────────
+  const [searchText, setSearchText]       = useState('');
+  /** One major brand at a time; '' = no brand filter (show all in current fetch). */
+  const [selectedBrand, setSelectedBrand] = useState('');
+  const [radiusKm, setRadiusKm]           = useState(FIXED_RADIUS_KM);
+  const [radiusCenter, setRadiusCenter]   = useState(null);
+  const [fuelProductId, setFuelProductId] = useState('');
+  const [filtersOpen, setFiltersOpen]     = useState(true);
+
+  // City search (map mode — overrides radius when set)
+  const [cityInput, setCityInput]         = useState('');
+  const [cityFilter, setCityFilter]       = useState('');   // submitted value
+  const [stationBounds, setStationBounds] = useState(null); // [[w,s],[e,n]]
+
+  // ── Fetch fuel products once ──────────────────────────────────────────────
   useEffect(() => {
-    stationsApi.getAll()
-      .then((d) => setAllStations(d.stations))
-      .catch((e) => setError(e.message))
-      .finally(() => setLoading(false));
+    client.get('/fuel-products')
+      .then((r) => setFuelProducts(r.data.fuel_products || []))
+      .catch(() => {});
   }, []);
 
-  // ── Derive unique brands ─────────────────────────────────────────────────────
-  const brands = useMemo(() => {
-    const seen = new Set();
-    allStations.forEach((s) => { if (s.brand) seen.add(s.brand); });
-    return [...seen].sort();
-  }, [allStations]);
+  // ── Auto-detect location on mount ─────────────────────────────────────────
+  useEffect(() => {
+    if (!navigator.geolocation) {
+      setLocState('denied');
+      return;
+    }
+    setLocState('requesting');
+    navigator.geolocation.getCurrentPosition(
+      (pos) => {
+        const coords = [pos.coords.longitude, pos.coords.latitude];
+        setUserCoords(coords);
+        setRadiusCenter(coords);
+        setLocState('found');
+      },
+      () => {
+        setLocState('denied');
+      },
+      { timeout: 10000, maximumAge: 60000 },
+    );
+  }, []);
 
-  // ── Apply filters ────────────────────────────────────────────────────────────
+  // ── Fetch stations whenever fetch params change ───────────────────────────
+  useEffect(() => {
+    setLoading(true);
+    setError('');
+
+    const params = {};
+
+    if (cityFilter) {
+      // City search mode — ignore radius
+      params.city = cityFilter;
+    } else if (radiusCenter) {
+      params.lat       = radiusCenter[1];
+      params.lng       = radiusCenter[0];
+      params.radius_km = radiusKm;
+    }
+
+    if (fuelProductId) params.fuel_product_id = fuelProductId;
+
+    stationsApi.getAll(params)
+      .then((d) => {
+        const list = d.stations || [];
+        setStations(list);
+
+        // When a city search returned results, fit the map to those stations
+        if (cityFilter && list.length > 0) {
+          const lngs = list.map((s) => s.longitude);
+          const lats = list.map((s) => s.latitude);
+          setStationBounds([
+            [Math.min(...lngs), Math.min(...lats)],
+            [Math.max(...lngs), Math.max(...lats)],
+          ]);
+        } else {
+          setStationBounds(null);
+        }
+      })
+      .catch((e) => setError(e.message))
+      .finally(() => setLoading(false));
+  }, [radiusCenter, radiusKm, fuelProductId, cityFilter]);
+
+  // ── Derive major brands present in the current fetch ─────────────────────
+  // Only expose recognised major brands (keys from BRAND_COLORS) in the filter
+  // so users aren't shown obscure/unbranded one-off names.
+  const brands = useMemo(() => {
+    const major = Object.keys(BRAND_COLORS);
+    const present = new Set(
+      stations
+        .map((s) => s.brand)
+        .filter(Boolean)
+        .map((b) => {
+          for (const key of major) {
+            if (b.toLowerCase().includes(key.toLowerCase())) return key;
+          }
+          return null;
+        })
+        .filter(Boolean)
+    );
+    return major.filter((b) => present.has(b));
+  }, [stations]);
+
+  // Clear selection if that brand no longer appears in the current result set.
+  useEffect(() => {
+    setSelectedBrand((prev) => (prev && brands.includes(prev) ? prev : ''));
+  }, [brands]);
+
+  const brandFilterActive = selectedBrand !== '';
+
+  // ── Client-side filters (search + brand) ──────────────────────────────────
   const visibleStations = useMemo(() => {
-    return allStations.filter((s) => {
-      // 1. Text search
+    return stations.filter((s) => {
       if (searchText) {
         const q = searchText.toLowerCase();
         if (
           !s.name?.toLowerCase().includes(q) &&
           !s.brand?.toLowerCase().includes(q) &&
-          !s.barangay?.toLowerCase().includes(q)
+          !s.city?.toLowerCase().includes(q) &&
+          !s.province?.toLowerCase().includes(q)
         ) return false;
       }
-
-      // 2. Brand filter
-      if (activeBrands.size > 0 && !activeBrands.has(s.brand)) return false;
-
-      // 3. Radius filter
-      if (radiusKm > 0) {
-        const dist = haversine(s.latitude, s.longitude, radiusCenter[1], radiusCenter[0]);
-        if (dist > radiusKm) return false;
+      if (brandFilterActive) {
+        const key = selectedBrand.toLowerCase();
+        if (!s.brand?.toLowerCase().includes(key)) return false;
       }
-
       return true;
     });
-  }, [allStations, searchText, activeBrands, radiusKm, radiusCenter]);
+  }, [stations, searchText, brandFilterActive, selectedBrand]);
 
-  const toggleBrand = useCallback((brand) => {
-    setActiveBrands((prev) => {
-      const next = new Set(prev);
-      next.has(brand) ? next.delete(brand) : next.add(brand);
-      return next;
+  // ── Sorted by distance when a radius centre is active ────────────────────
+  const sortedVisible = useMemo(() => {
+    if (!radiusCenter) return visibleStations;
+    return [...visibleStations].sort((a, b) => {
+      const dA = haversine(a.latitude, a.longitude, radiusCenter[1], radiusCenter[0]);
+      const dB = haversine(b.latitude, b.longitude, radiusCenter[1], radiusCenter[0]);
+      return dA - dB;
     });
+  }, [visibleStations, radiusCenter]);
+
+  const selectBrand = useCallback((brand) => {
+    setSelectedBrand((prev) => (prev === brand ? '' : brand));
   }, []);
 
   const clearFilters = () => {
     setSearchText('');
-    setActiveBrands(new Set());
-    setRadiusKm(0);
-    setRadiusCenter(TUGUEGARAO_CENTER);
-    setUsingMyLocation(false);
+    setSelectedBrand('');
+    setFuelProductId('');
+    setCityInput('');
+    setCityFilter('');
   };
 
+  const handleCitySearch = useCallback((town) => {
+    const city = town.trim();
+    if (!city) return;
+    setCityInput(city);
+    setCityFilter(city);
+    // Clear location radius when browsing by city
+    setRadiusCenter(null);
+    setUserCoords(null);
+    setLocState('idle');
+  }, []);
+
   const locateMe = () => {
-    if (!navigator.geolocation) return alert('Geolocation is not supported by your browser.');
-    setLocating(true);
+    if (!navigator.geolocation) return;
+    setLocState('requesting');
     navigator.geolocation.getCurrentPosition(
       (pos) => {
         const coords = [pos.coords.longitude, pos.coords.latitude];
+        setUserCoords(coords);
         setRadiusCenter(coords);
-        setUsingMyLocation(true);
-        if (radiusKm === 0) setRadiusKm(5); // default to 5 km when locating
-        setLocating(false);
+        setLocState('found');
       },
-      () => {
-        alert('Could not get your location. Check browser permissions.');
-        setLocating(false);
-      },
+      () => setLocState('denied'),
+      { timeout: 10000, maximumAge: 0 },
     );
   };
 
+  const resetToRegion = () => {
+    setRadiusCenter(null);
+    setUserCoords(null);
+    setLocState('idle');
+    setSelectedBrand('');
+    setSearchText('');
+    setFuelProductId('');
+    setCityInput('');
+    setCityFilter('');
+    setStationBounds(null);
+  };
+
   const activeFilterCount =
-    (searchText ? 1 : 0) + activeBrands.size + (radiusKm > 0 ? 1 : 0);
+    (cityFilter ? 1 : 0) +
+    (selectedBrand ? 1 : 0) +
+    (fuelProductId ? 1 : 0);
 
-  if (loading) return <div className="page"><LoadingSpinner /></div>;
+  // ── Derived map props ─────────────────────────────────────────────────────
+  const mapCenter = locState === 'found' && userCoords ? userCoords : REGION_CENTER;
+  const mapZoom   = locState === 'found' ? 14 : REGION_ZOOM;
 
+  // ─────────────────────────────────────────────────────────────────────────
   return (
     <div className="page" style={{ paddingTop: '16px' }}>
       <div className="container">
 
-        {/* ── Page header ─────────────────────────────────────────────────── */}
+        {/* ── Page header ──────────────────────────────────────────────── */}
         <div className="section-header" style={{ marginBottom: '12px' }}>
           <div>
             <h1 style={{ marginBottom: '2px' }}>Station Map</h1>
             <p style={{ fontSize: '0.875rem', color: 'var(--color-text-muted)' }}>
-              Showing <strong>{visibleStations.length}</strong> of {allStations.length} stations
-              {radiusKm > 0 && ` within ${radiusKm} km`}
+              {loading
+                ? 'Loading stations…'
+                : <>
+                    Showing <strong>{visibleStations.length}</strong> of {stations.length} stations
+                    {radiusCenter && ` within ${radiusKm} km`}
+                  </>
+              }
             </p>
           </div>
-          <div style={{ display: 'flex', gap: '8px' }}>
+          <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
             <button
               className={`btn btn-sm ${filtersOpen ? 'btn-primary' : 'btn-secondary'}`}
               onClick={() => setFiltersOpen((o) => !o)}
             >
-              🔍 Filters{activeFilterCount > 0 ? ` (${activeFilterCount})` : ''}
+              Filters{activeFilterCount > 0 ? ` (${activeFilterCount})` : ''}
             </button>
-            <Link to="/stations" className="btn btn-secondary btn-sm">📋 List View</Link>
+            <Link to="/stations" className="btn btn-secondary btn-sm">List View</Link>
           </div>
         </div>
 
         {error && <div className="alert alert-warning">{error}</div>}
 
-        {/* ── Filter panel ────────────────────────────────────────────────── */}
+        {/* ── Location banner ──────────────────────────────────────────── */}
+        {locState === 'requesting' && (
+          <div className="alert" style={{ background: '#eff6ff', border: '1px solid #bfdbfe', color: '#1e40af', marginBottom: '12px', display: 'flex', alignItems: 'center', gap: '10px' }}>
+            <LoadingSpinner size="sm" />
+            <span>Detecting your location to find nearby stations…</span>
+          </div>
+        )}
+        {locState === 'denied' && (
+          <div className="alert" style={{ background: '#fefce8', border: '1px solid #fde68a', color: '#854d0e', marginBottom: '12px', display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '12px', flexWrap: 'wrap' }}>
+            <span>Location access was denied. Showing all stations — or <button className="btn btn-sm btn-secondary" onClick={locateMe} style={{ marginLeft: '4px' }}>try again</button></span>
+          </div>
+        )}
+
+        {/* ── Filter panel ─────────────────────────────────────────────── */}
         {filtersOpen && (
           <div className="card" style={{ marginBottom: '14px', padding: '16px' }}>
 
-            {/* Row 1: Search + clear */}
+            {/* Row 1: City search + clear */}
             <div style={{ display: 'flex', gap: '10px', alignItems: 'center', marginBottom: '14px', flexWrap: 'wrap' }}>
-              <input
-                className="form-control"
-                style={{ flex: '1 1 200px', minWidth: '180px' }}
-                placeholder="Search name, brand, barangay…"
-                value={searchText}
-                onChange={(e) => setSearchText(e.target.value)}
+              <CityAutocomplete
+                value={cityInput}
+                onChange={setCityInput}
+                onSearch={handleCitySearch}
+                placeholder="Search town or city to filter stations…"
               />
-              {activeFilterCount > 0 && (
-                <button className="btn btn-sm btn-secondary" onClick={clearFilters}>✕ Clear all</button>
+              {cityFilter && (
+                <button className="btn btn-sm btn-secondary" onClick={() => { setCityInput(''); setCityFilter(''); setStationBounds(null); }}>✕ Clear city</button>
               )}
             </div>
 
-            {/* Row 2: Brand pills */}
+            {/* Row 2: Fuel type */}
             <div style={{ marginBottom: '14px' }}>
-              <div style={{ fontSize: '0.78rem', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.05em', color: 'var(--color-text-muted)', marginBottom: '8px' }}>
-                Brand
-              </div>
+              <div style={sectionLabel}>Fuel Type</div>
               <div style={{ display: 'flex', flexWrap: 'wrap', gap: '6px' }}>
-                {/* "All" pill */}
-                <button
-                  onClick={() => setActiveBrands(new Set())}
-                  style={{
-                    padding: '4px 14px', borderRadius: '999px', fontSize: '0.8rem', fontWeight: 600,
-                    cursor: 'pointer', border: '1.5px solid',
-                    borderColor: activeBrands.size === 0 ? '#2563eb' : '#e2e8f0',
-                    background: activeBrands.size === 0 ? '#2563eb' : '#fff',
-                    color: activeBrands.size === 0 ? '#fff' : 'var(--color-text)',
-                    transition: 'all 0.15s',
-                  }}
-                >
-                  All
-                </button>
-                {brands.map((brand) => {
-                  const active = activeBrands.has(brand);
-                  const color  = brandColor(brand);
-                  return (
-                    <button
-                      key={brand}
-                      onClick={() => toggleBrand(brand)}
-                      style={{
-                        padding: '4px 14px', borderRadius: '999px', fontSize: '0.8rem', fontWeight: 600,
-                        cursor: 'pointer', border: `1.5px solid ${active ? color : '#e2e8f0'}`,
-                        background: active ? color : '#fff',
-                        color: active ? '#fff' : 'var(--color-text)',
-                        transition: 'all 0.15s',
-                      }}
-                    >
-                      {brand}
-                    </button>
-                  );
-                })}
+                <FilterPill
+                  label="All types"
+                  active={!fuelProductId}
+                  color="#2563eb"
+                  onClick={() => setFuelProductId('')}
+                />
+                {fuelProducts.map((fp) => (
+                  <FilterPill
+                    key={fp.id}
+                    label={fp.name}
+                    active={fuelProductId === fp.id}
+                    color="#2563eb"
+                    onClick={() => setFuelProductId(fuelProductId === fp.id ? '' : fp.id)}
+                  />
+                ))}
               </div>
             </div>
 
-            {/* Row 3: Radius */}
-            <div>
-              <div style={{ fontSize: '0.78rem', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.05em', color: 'var(--color-text-muted)', marginBottom: '8px' }}>
-                Radius
+            {/* Row 3: Brand (single-select; tap again to clear) */}
+            <div style={{ marginBottom: '14px' }}>
+              <div style={sectionLabel}>Brand</div>
+              <div style={{ display: 'flex', flexWrap: 'wrap', gap: '6px' }}>
+                {brands.map((brand) => (
+                  <FilterPill
+                    key={brand}
+                    label={brand}
+                    active={selectedBrand === brand}
+                    color={brandColor(brand)}
+                    onClick={() => selectBrand(brand)}
+                  />
+                ))}
               </div>
-              <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>
-                {/* Radius buttons */}
-                <div style={{ display: 'flex', gap: '6px', flexWrap: 'wrap' }}>
-                  {RADIUS_OPTIONS.map(({ label, km }) => (
-                    <button
-                      key={km}
-                      onClick={() => setRadiusKm(km)}
-                      style={{
-                        padding: '4px 14px', borderRadius: '999px', fontSize: '0.8rem', fontWeight: 600,
-                        cursor: 'pointer', border: '1.5px solid',
-                        borderColor: radiusKm === km ? '#2563eb' : '#e2e8f0',
-                        background: radiusKm === km ? '#2563eb' : '#fff',
-                        color: radiusKm === km ? '#fff' : 'var(--color-text)',
-                        transition: 'all 0.15s',
-                      }}
-                    >
-                      {label}
-                    </button>
-                  ))}
-                </div>
+            </div>
 
-                {radiusKm > 0 && (
+            {/* Row 4: Location */}
+            <div>
+              <div style={sectionLabel}>Location</div>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '12px', flexWrap: 'wrap' }}>
+                {locState === 'found' ? (
                   <>
-                    <div style={{ width: '1px', height: '24px', background: '#e2e8f0' }} />
-                    <div style={{ fontSize: '0.8rem', color: 'var(--color-text-muted)' }}>
-                      Centre:{' '}
-                      <span style={{ fontWeight: 600, color: usingMyLocation ? '#059669' : 'var(--color-text)' }}>
-                        {usingMyLocation ? '📍 My location' : '🏙 Tuguegarao'}
-                      </span>
-                    </div>
+                    <span style={{ fontSize: '0.82rem', color: '#059669', fontWeight: 600 }}>
+                      📍 Using your location &mdash; showing stations within <strong>2 km</strong>
+                    </span>
                     <button
-                      className="btn btn-sm"
-                      style={{ background: usingMyLocation ? '#059669' : '#fff', color: usingMyLocation ? '#fff' : 'var(--color-text)', border: '1.5px solid', borderColor: usingMyLocation ? '#059669' : '#e2e8f0', fontSize: '0.8rem', padding: '4px 12px' }}
-                      onClick={usingMyLocation ? () => { setRadiusCenter(TUGUEGARAO_CENTER); setUsingMyLocation(false); } : locateMe}
-                      disabled={locating}
+                      className="btn btn-sm btn-secondary"
+                      style={{ fontSize: '0.78rem', padding: '3px 10px' }}
+                      onClick={resetToRegion}
                     >
-                      {locating ? 'Locating…' : usingMyLocation ? '✓ Using my location' : '📍 Use my location'}
+                      Show all stations
                     </button>
                   </>
+                ) : (
+                  <button
+                    className="btn btn-sm"
+                    style={{ background: '#fff', border: '1.5px solid #e2e8f0', fontSize: '0.8rem', padding: '4px 12px', cursor: 'pointer' }}
+                    onClick={locateMe}
+                    disabled={locState === 'requesting'}
+                  >
+                    {locState === 'requesting' ? 'Locating…' : '📍 Use my location (2 km radius)'}
+                  </button>
                 )}
               </div>
             </div>
           </div>
         )}
 
-        {/* ── Map + sidebar grid ───────────────────────────────────────────── */}
+        {/* ── Map + sidebar grid ───────────────────────────────────────── */}
         <div style={{ display: 'grid', gridTemplateColumns: selected ? '1fr 300px' : '1fr', gap: '14px', alignItems: 'start' }}>
 
           {/* Map */}
-          <div className="card" style={{ padding: '6px' }}>
+          <div className="card" style={{ padding: '6px', position: 'relative' }}>
+            {loading && (
+              <div style={{ position: 'absolute', top: '14px', left: '50%', transform: 'translateX(-50%)', zIndex: 10, background: 'rgba(255,255,255,0.92)', borderRadius: '999px', padding: '6px 16px', boxShadow: '0 2px 8px rgba(0,0,0,0.12)', display: 'flex', alignItems: 'center', gap: '8px', fontSize: '0.82rem', fontWeight: 600 }}>
+                <LoadingSpinner size="sm" /> Loading stations…
+              </div>
+            )}
             <MapComponent
               stations={visibleStations}
               height="570px"
+              center={mapCenter}
+              zoom={mapZoom}
               onStationClick={(s) => setSelected(s)}
               selectedId={selected?.id}
-              radiusCircle={radiusKm > 0 ? { center: radiusCenter, radiusKm } : null}
-              userLocation={usingMyLocation ? radiusCenter : null}
+              radiusCircle={radiusCenter ? { center: radiusCenter, radiusKm } : null}
+              userLocation={locState === 'found' ? userCoords : null}
+              fitBounds={stationBounds}
             />
           </div>
 
@@ -295,12 +412,8 @@ export default function MapPage() {
             <div className="card" style={{ position: 'sticky', top: '76px' }}>
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: '8px' }}>
                 <div>
-                  <div
-                    style={{
-                      display: 'inline-block', width: '10px', height: '10px',
-                      borderRadius: '50%', background: brandColor(selected.brand),
-                      marginRight: '6px',
-                    }}
+                  <span
+                    style={{ display: 'inline-block', width: '10px', height: '10px', borderRadius: '50%', background: brandColor(selected.brand), marginRight: '6px' }}
                   />
                   <span style={{ fontWeight: 700, fontSize: '0.95rem' }}>{selected.name}</span>
                 </div>
@@ -317,10 +430,17 @@ export default function MapPage() {
                   </span>
                 </div>
               )}
-              {selected.barangay && <p style={{ fontSize: '0.83rem', marginTop: '8px' }}>📍 {selected.barangay}</p>}
-              {selected.address  && <p style={{ fontSize: '0.83rem', color: 'var(--color-text-muted)' }}>{selected.address}</p>}
 
-              {radiusKm > 0 && (
+              {(selected.city || selected.province) && (
+                <p style={{ fontSize: '0.83rem', color: 'var(--color-text-muted)' }}>
+                  {[selected.city, selected.province].filter(Boolean).join(', ')}
+                </p>
+              )}
+              {selected.address && (
+                <p style={{ fontSize: '0.83rem', color: 'var(--color-text-muted)' }}>{selected.address}</p>
+              )}
+
+              {radiusCenter && (
                 <p style={{ fontSize: '0.8rem', color: 'var(--color-text-muted)', marginTop: '6px' }}>
                   📏 {haversine(selected.latitude, selected.longitude, radiusCenter[1], radiusCenter[0]).toFixed(2)} km away
                 </p>
@@ -335,20 +455,20 @@ export default function MapPage() {
           )}
         </div>
 
-        {/* ── Fallback list ────────────────────────────────────────────────── */}
+        {/* ── Station list (collapsible) ───────────────────────────────── */}
         <details style={{ marginTop: '20px' }}>
           <summary style={{ cursor: 'pointer', color: 'var(--color-text-secondary)', fontSize: '0.88rem', fontWeight: 600 }}>
-            📋 Show Station List ({visibleStations.length})
+            Show Station List ({sortedVisible.length})
           </summary>
           <div style={{ marginTop: '12px', display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(210px, 1fr))', gap: '8px' }}>
-            {visibleStations.map((s) => (
+            {sortedVisible.map((s) => (
               <Link key={s.id} to={`/stations/${s.id}`} className="card card-hover"
                 style={{ padding: '12px', textDecoration: 'none', borderLeft: `4px solid ${brandColor(s.brand)}` }}>
                 <div style={{ fontWeight: 600, fontSize: '0.88rem', color: 'var(--color-text)' }}>{s.name}</div>
                 <div style={{ fontSize: '0.78rem', color: 'var(--color-text-muted)', marginTop: '2px' }}>
-                  {[s.brand, s.barangay].filter(Boolean).join(' · ')}
+                  {[s.brand, s.city].filter(Boolean).join(' · ')}
                 </div>
-                {radiusKm > 0 && (
+                {radiusCenter && (
                   <div style={{ fontSize: '0.75rem', color: 'var(--color-text-muted)', marginTop: '4px' }}>
                     {haversine(s.latitude, s.longitude, radiusCenter[1], radiusCenter[0]).toFixed(1)} km
                   </div>
@@ -360,5 +480,37 @@ export default function MapPage() {
 
       </div>
     </div>
+  );
+}
+
+// ─── Shared label style ────────────────────────────────────────────────────────
+const sectionLabel = {
+  fontSize: '0.78rem',
+  fontWeight: 700,
+  textTransform: 'uppercase',
+  letterSpacing: '0.05em',
+  color: 'var(--color-text-muted)',
+  marginBottom: '8px',
+};
+
+// ─── Reusable filter pill ──────────────────────────────────────────────────────
+function FilterPill({ label, active, color, onClick }) {
+  return (
+    <button
+      onClick={onClick}
+      style={{
+        padding: '4px 14px',
+        borderRadius: '999px',
+        fontSize: '0.8rem',
+        fontWeight: 600,
+        cursor: 'pointer',
+        border: `1.5px solid ${active ? color : '#e2e8f0'}`,
+        background: active ? color : '#fff',
+        color: active ? '#fff' : 'var(--color-text)',
+        transition: 'all 0.15s',
+      }}
+    >
+      {label}
+    </button>
   );
 }

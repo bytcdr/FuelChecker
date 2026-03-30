@@ -5,20 +5,38 @@ const { newId, now } = require('../utils/helpers');
 // ─── Public ──────────────────────────────────────────────────────────────────
 
 function getStations(req, res) {
-  const { search, brand, barangay } = req.query;
+  const { search, brand, city, province, lat, lng, radius_km, fuel_product_id } = req.query;
 
-  let query = "SELECT * FROM stations WHERE is_active = 1 AND status = 'approved'";
+  let query = "SELECT s.* FROM stations s WHERE s.is_active = 1 AND s.status = 'approved'";
   const params = [];
 
   if (search) {
-    query += ' AND (name LIKE ? OR brand LIKE ? OR barangay LIKE ?)';
+    query += ' AND (s.name LIKE ? OR s.brand LIKE ? OR s.city LIKE ? OR s.province LIKE ?)';
     const like = `%${search}%`;
-    params.push(like, like, like);
+    params.push(like, like, like, like);
   }
-  if (brand)    { query += ' AND brand = ?';    params.push(brand); }
-  if (barangay) { query += ' AND barangay = ?'; params.push(barangay); }
+  if (brand)    { query += ' AND s.brand = ?';    params.push(brand); }
+  if (city)     { query += ' AND s.city LIKE ?';   params.push(`%${city}%`); }
+  if (province) { query += ' AND s.province = ?'; params.push(province); }
 
-  query += ' ORDER BY name ASC';
+  // Bounding-box pre-filter for radius queries (fast SQL approximation)
+  if (lat && lng && radius_km) {
+    const latF     = parseFloat(lat);
+    const lngF     = parseFloat(lng);
+    const rKm      = parseFloat(radius_km);
+    const latDelta = rKm / 111.0;
+    const lngDelta = rKm / (111.0 * Math.cos((latF * Math.PI) / 180));
+    query += ' AND s.latitude  BETWEEN ? AND ? AND s.longitude BETWEEN ? AND ?';
+    params.push(latF - latDelta, latF + latDelta, lngF - lngDelta, lngF + lngDelta);
+  }
+
+  // Only stations that have a current displayed price for the chosen fuel product
+  if (fuel_product_id) {
+    query += ' AND EXISTS (SELECT 1 FROM displayed_prices dp WHERE dp.station_id = s.id AND dp.fuel_product_id = ?)';
+    params.push(fuel_product_id);
+  }
+
+  query += ' ORDER BY s.name ASC';
   return res.json({ stations: db.prepare(query).all(...params) });
 }
 
@@ -33,6 +51,13 @@ function getBrands(req, res) {
     "SELECT DISTINCT brand FROM stations WHERE is_active = 1 AND status = 'approved' AND brand IS NOT NULL ORDER BY brand"
   ).all().map((r) => r.brand);
   return res.json({ brands });
+}
+
+function getCities(req, res) {
+  const cities = db.prepare(
+    "SELECT DISTINCT city FROM stations WHERE is_active = 1 AND status = 'approved' AND city IS NOT NULL ORDER BY city"
+  ).all().map((r) => r.city);
+  return res.json({ cities });
 }
 
 function getBarangays(req, res) {
@@ -59,7 +84,7 @@ function submitStation(req, res) {
     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 1, 'pending', ?, ?, ?)
   `).run(
     id, name, brand || null, address || null, barangay || null,
-    city || 'Tuguegarao', province || 'Cagayan',
+    city || null, province || null,
     latitude, longitude,
     req.user.id, ts, ts,
   );
@@ -140,7 +165,7 @@ function createStation(req, res) {
       (id, name, brand, address, barangay, city, province, latitude, longitude, is_active, status, created_at, updated_at)
     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 1, 'approved', ?, ?)
   `).run(id, name, brand || null, address || null, barangay || null,
-    city || 'Tuguegarao', province || 'Cagayan', latitude, longitude, ts, ts);
+    city || null, province || null, latitude, longitude, ts, ts);
 
   return res.status(201).json({ station: db.prepare('SELECT * FROM stations WHERE id = ?').get(id) });
 }
@@ -179,7 +204,7 @@ function deactivateStation(req, res) {
 }
 
 module.exports = {
-  getStations, getStation, getBrands, getBarangays,
+  getStations, getStation, getBrands, getCities, getBarangays,
   submitStation, getMyStationSubmissions,
   getPendingStations, getAllStationsAdmin, approveStation, rejectStation,
   createStation, updateStation, deactivateStation,

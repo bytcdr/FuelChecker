@@ -51,6 +51,10 @@ export const stationsApi = {
     const res = await client.get('/stations/meta/brands');
     return res.data;
   },
+  getCities: async () => {
+    const res = await client.get('/stations/meta/cities');
+    return res.data;
+  },
   getBarangays: async () => {
     const res = await client.get('/stations/meta/barangays');
     return res.data;

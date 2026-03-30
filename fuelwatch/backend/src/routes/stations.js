@@ -1,7 +1,7 @@
 const express = require('express');
 const router = express.Router();
 const {
-  getStations, getStation, getBrands, getBarangays,
+  getStations, getStation, getBrands, getCities, getBarangays,
   submitStation, getMyStationSubmissions,
   getPendingStations, getAllStationsAdmin, approveStation, rejectStation,
   createStation, updateStation, deactivateStation,
@@ -13,6 +13,7 @@ const { stationValidator } = require('../validators/stationValidator');
 
 // Public meta
 router.get('/meta/brands',       getBrands);
+router.get('/meta/cities',       getCities);
 router.get('/meta/barangays',    getBarangays);
 
 // Authenticated user — specific paths before /:id
