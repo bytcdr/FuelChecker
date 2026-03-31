@@ -2,8 +2,9 @@ require('dotenv').config();
 const app = require('./app');
 
 const PORT = process.env.PORT || 5000;
+const HOST = process.env.HOST || '0.0.0.0';
 
-app.listen(PORT, () => {
-  console.log(`FuelWatch API running on http://localhost:${PORT}`);
+app.listen(PORT, HOST, () => {
+  console.log(`FuelWatch API running on http://${HOST}:${PORT}`);
   console.log(`Environment: ${process.env.NODE_ENV || 'development'}`);
 });
