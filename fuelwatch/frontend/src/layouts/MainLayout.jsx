@@ -2,6 +2,7 @@ import React from 'react';
 import { Outlet } from 'react-router-dom';
 import Header from '../components/common/Header.jsx';
 import Footer from '../components/common/Footer.jsx';
+import BottomNav from '../components/common/BottomNav.jsx';
 
 export default function MainLayout() {
   return (
@@ -11,6 +12,7 @@ export default function MainLayout() {
         <Outlet />
       </main>
       <Footer />
+      <BottomNav />
     </div>
   );
 }

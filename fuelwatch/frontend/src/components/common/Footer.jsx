@@ -3,7 +3,7 @@ import { Link } from 'react-router-dom';
 
 export default function Footer() {
   return (
-    <footer style={{
+    <footer className="site-footer" style={{
       background: 'var(--color-surface)',
       borderTop: '1px solid var(--color-border)',
       padding: '24px 0',

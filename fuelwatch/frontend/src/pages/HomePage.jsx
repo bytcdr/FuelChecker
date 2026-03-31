@@ -2,7 +2,6 @@ import React, { useState, useEffect } from 'react';
 import { Link } from 'react-router-dom';
 import { stationsApi } from '../api/stations.js';
 import StationCard from '../components/stations/StationCard.jsx';
-import SearchBar from '../components/common/SearchBar.jsx';
 import LoadingSpinner from '../components/common/LoadingSpinner.jsx';
 
 export default function HomePage() {
@@ -32,14 +31,14 @@ export default function HomePage() {
       }}>
         <div className="container" style={{ textAlign: 'center' }}>
           <div style={{ fontSize: '3rem', marginBottom: '16px' }}>⛽</div>
-          <h1 style={{ color: '#fff', fontSize: '2.5rem', marginBottom: '12px' }}>
+          <h1 style={{ color: '#fff', fontSize: 'clamp(1.6rem, 6vw, 2.5rem)', marginBottom: '12px' }}>
             FuelWatch Philippines
           </h1>
           <p style={{ color: '#bfdbfe', fontSize: '1.15rem', maxWidth: '520px', margin: '0 auto 32px' }}>
             Community-powered fuel price tracking for Regions I, II & CAR.
             Find the best prices near you.
           </p>
-          <form onSubmit={handleSearch} style={{ display: 'flex', gap: '12px', maxWidth: '480px', margin: '0 auto' }}>
+          <form className="home-hero-form" onSubmit={handleSearch} style={{ display: 'flex', gap: '12px', maxWidth: '480px', margin: '0 auto' }}>
             <input
               type="text"
               className="form-control"
@@ -50,7 +49,7 @@ export default function HomePage() {
             />
             <button type="submit" className="btn btn-secondary" style={{ flexShrink: 0 }}>Search</button>
           </form>
-          <div style={{ display: 'flex', gap: '16px', justifyContent: 'center', marginTop: '24px' }}>
+          <div className="home-hero-ctas" style={{ display: 'flex', gap: '16px', justifyContent: 'center', marginTop: '24px' }}>
             <Link to="/stations" className="btn" style={{ background: 'rgba(255,255,255,0.2)', color: '#fff', border: '1.5px solid rgba(255,255,255,0.4)' }}>
               Browse Stations
             </Link>

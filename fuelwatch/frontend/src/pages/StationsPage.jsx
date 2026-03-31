@@ -85,7 +85,7 @@ export default function StationsPage() {
 
         {/* ── Search bar ───────────────────────────────────────────────── */}
         <form onSubmit={(e) => { e.preventDefault(); handleSearch(); }}>
-          <div style={{ display: 'flex', gap: '8px', marginBottom: '16px' }}>
+          <div className="stations-search-row" style={{ display: 'flex', gap: '8px', marginBottom: '16px' }}>
             <CityAutocomplete
               value={cityInput}
               onChange={setCityInput}

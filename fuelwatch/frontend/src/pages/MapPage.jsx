@@ -385,7 +385,7 @@ export default function MapPage() {
         )}
 
         {/* ── Map + sidebar grid ───────────────────────────────────────── */}
-        <div style={{ display: 'grid', gridTemplateColumns: selected ? '1fr 300px' : '1fr', gap: '14px', alignItems: 'start' }}>
+        <div className="map-layout" style={{ display: 'grid', gridTemplateColumns: selected ? '1fr 300px' : '1fr', gap: '14px', alignItems: 'start' }}>
 
           {/* Map */}
           <div className="card" style={{ padding: '6px', position: 'relative' }}>
@@ -396,7 +396,7 @@ export default function MapPage() {
             )}
             <MapComponent
               stations={visibleStations}
-              height="570px"
+              height="clamp(420px, 68vh, 570px)"
               center={mapCenter}
               zoom={mapZoom}
               onStationClick={(s) => setSelected(s)}
